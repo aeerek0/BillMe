@@ -166,9 +166,30 @@
   </form>
 </div>
 
+<div class="pay-overlay" id="payOverlay">
+  <form class="pay-sheet" id="payForm">
+    <div class="sheet-head">
+      <div class="serif sheet-title">บันทึกการจ่าย</div>
+      <button type="button" class="close-btn" id="payCloseBtn" aria-label="ปิด">✕</button>
+    </div>
+    <div class="pay-info">
+      <div class="pay-info-row"><strong id="payBillName">-</strong><strong id="payEstimate">฿0</strong></div>
+      <div class="pay-info-row pay-est"><span>ยอดประมาณการ</span><span id="payEstimate2">฿0</span></div>
+    </div>
+    <div class="field">
+      <div class="field-label">ยอดจ่ายจริง (บาท)</div>
+      <input id="payAmount" class="pay-input" type="number" min="0" step="0.01" required />
+    </div>
+    <div class="field">
+      <div class="field-label">วันที่จ่ายจริง</div>
+      <input id="payDate" class="pay-date" type="date" required />
+    </div>
+    <button type="submit" class="submit-btn">บันทึกการจ่าย</button>
+  </form>
+</div>
 <script>
 /* ===== ตั้งค่าให้ตรงกับของคุณ ===== */
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxqdgdFDclFKDUm5WjFifJR66DmsdzDrKv7_cl3f5N4Hcb1bxP-wF1FbgADNAFkDYr3/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzZckDFRcPuOmi3pn6v0433hZW_HUALtdOk2vmS6fsf_xgBruPtwU_FwLDeYTugUF6j/exec';
 const TOKEN = '4830203652@Aee'; // ต้องตรงกับ TOKEN ใน Code.gs
 /* ================================== */
 
@@ -209,11 +230,45 @@ async function loadAll() {
   document.getElementById('listArea').innerHTML = '<div class="loading">กำลังโหลดข้อมูล...</div>';
   try {
     const data = await api('list');
-    bills = data.bills; paidMap = data.paidMap;
+    bills = Array.isArray(data.bills) ? data.bills : [];
+    paidMap = normalizePaidMap(data.paidMap);
     render();
   } catch (e) {
     document.getElementById('listArea').innerHTML = `<div class="loading">โหลดข้อมูลไม่สำเร็จ: ตรวจสอบ APPS_SCRIPT_URL และ TOKEN ในไฟล์นี้<br><span style="font-size:11px;">${e.message}</span></div>`;
   }
+}
+
+function normalizePaidMap(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+
+  Object.keys(raw).forEach(monthKey => {
+    const value = raw[monthKey];
+    out[monthKey] = {};
+
+    // New format: { billId: { paidAmount, paidDate } }
+    if (value && !Array.isArray(value) && typeof value === 'object') {
+      Object.keys(value).forEach(id => {
+        const item = value[id];
+        if (item && typeof item === 'object') {
+          out[monthKey][String(id)] = {
+            paidAmount: Number(item.paidAmount || 0),
+            paidDate: item.paidDate ? String(item.paidDate).substring(0, 10) : ''
+          };
+        }
+      });
+      return;
+    }
+
+    // Old format: [billId, billId, ...]
+    if (Array.isArray(value)) {
+      value.forEach(id => {
+        out[monthKey][String(id)] = { paidAmount: 0, paidDate: '' };
+      });
+    }
+  });
+
+  return out;
 }
 
 function render() {
@@ -426,7 +481,7 @@ async function togglePaid(id) {
 async function deleteBill(id) {
   try {
     const data = await api('deleteBill', { id });
-    bills = data.bills; paidMap = data.paidMap;
+    bills = Array.isArray(data.bills) ? data.bills : []; paidMap = normalizePaidMap(data.paidMap);
     render();
   } catch (e) { showErr(e); }
 }
@@ -435,7 +490,7 @@ async function resetAll() {
   if (!confirm('ล้างรายการบิลทั้งหมด? การกระทำนี้ย้อนกลับไม่ได้')) return;
   try {
     const data = await api('resetAll');
-    bills = data.bills; paidMap = data.paidMap;
+    bills = Array.isArray(data.bills) ? data.bills : []; paidMap = normalizePaidMap(data.paidMap);
     render();
   } catch (e) { showErr(e); }
 }
@@ -527,7 +582,7 @@ document.getElementById('billForm').addEventListener('submit', async (e) => {
         installments
       }))
     });
-    bills = data.bills; paidMap = data.paidMap;
+    bills = Array.isArray(data.bills) ? data.bills : []; paidMap = normalizePaidMap(data.paidMap);
     document.getElementById('billForm').reset();
     document.getElementById('fDueDay').value = 1;
     document.getElementById('fStartMonth').value = '';
@@ -547,27 +602,7 @@ buildCatGrid();
 loadAll();
 </script>
 
-<div class="pay-overlay" id="payOverlay">
-  <form class="pay-sheet" id="payForm">
-    <div class="sheet-head">
-      <div class="serif sheet-title">บันทึกการจ่าย</div>
-      <button type="button" class="close-btn" id="payCloseBtn" aria-label="ปิด">✕</button>
-    </div>
-    <div class="pay-info">
-      <div class="pay-info-row"><strong id="payBillName">-</strong><strong id="payEstimate">฿0</strong></div>
-      <div class="pay-info-row pay-est"><span>ยอดประมาณการ</span><span id="payEstimate2">฿0</span></div>
-    </div>
-    <div class="field">
-      <div class="field-label">ยอดจ่ายจริง (บาท)</div>
-      <input id="payAmount" class="pay-input" type="number" min="0" step="0.01" required />
-    </div>
-    <div class="field">
-      <div class="field-label">วันที่จ่ายจริง</div>
-      <input id="payDate" class="pay-date" type="date" required />
-    </div>
-    <button type="submit" class="submit-btn">บันทึกการจ่าย</button>
-  </form>
-</div>
+
 
 </body>
 </html>
