@@ -63,6 +63,12 @@
   .cat-btn span{font-size:10.5px; color:var(--ink-muted); text-align:center; line-height:1.2;}
   .cat-btn.active span{color:var(--cover);}
   .submit-btn{width:100%; margin-top:8px; padding:13px 0; border-radius:12px; border:none; background:var(--cover); color:var(--gold); font-size:15px; font-weight:700; cursor:pointer;}
+  .type-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  .type-btn{padding:10px 8px; border-radius:10px; border:1.5px solid var(--line); background:#fff; cursor:pointer; text-align:center; font-size:13px; color:var(--ink-muted);}
+  .type-btn.active{border-color:var(--cover); background:rgba(31,61,58,.06); color:var(--cover); font-weight:700;}
+  .installment-fields{display:none;}
+  .installment-fields.show{display:block;}
+  .installment-note{font-size:11px; color:var(--ink-muted); margin-top:4px; line-height:1.4;}
   .err-msg{text-align:center; margin-top:10px; font-size:12px; color:var(--overdue);}
   @keyframes stampIn{0%{opacity:0; transform:translateY(-50%) rotate(-14deg) scale(1.6);}60%{opacity:1;}100%{opacity:.75; transform:translateY(-50%) rotate(-10deg) scale(1);}}
   .stamp.new{animation:stampIn .4s ease-out;}
@@ -127,6 +133,28 @@
       </div>
     </div>
     <div class="field">
+      <div class="field-label">ประเภทบิล</div>
+      <div class="type-grid" id="typeGrid">
+        <button type="button" class="type-btn active" data-type="recurring">🔄 บิลประจำ</button>
+        <button type="button" class="type-btn" data-type="installment">🧾 บิลผ่อน</button>
+      </div>
+    </div>
+
+    <div class="installment-fields" id="installmentFields">
+      <div class="two-col">
+        <div class="field" style="flex:1;">
+          <div class="field-label">เริ่มผ่อนเดือน</div>
+          <input id="fStartMonth" type="month" />
+        </div>
+        <div class="field" style="width:120px;">
+          <div class="field-label">จำนวนงวด</div>
+          <input id="fInstallments" type="number" min="1" max="120" value="1" />
+        </div>
+      </div>
+      <div class="installment-note">ระบบจะแสดงบิลเฉพาะช่วงเดือนที่ผ่อน และจะแสดงเลขงวด เช่น งวดที่ 3/10</div>
+    </div>
+
+    <div class="field">
       <div class="field-label">หมวดหมู่</div>
       <div class="cat-grid" id="catGrid"></div>
     </div>
@@ -136,7 +164,7 @@
 
 <script>
 /* ===== ตั้งค่าให้ตรงกับของคุณ ===== */
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8VVdF9TgaHI3Gn6yiJ8atErrA1ffTJ9IFdONsixHriepUaHQs_-WcfgiAyxtQBVrR/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPwhw0M27PF0Shrc3ihL6mw7np0wmBa1h-122T9KmJ_cVw4CNv0j2Xru8ZT6aDUnLy/exec';
 const TOKEN = '4830203652@Aee'; // ต้องตรงกับ TOKEN ใน Code.gs
 /* ================================== */
 
@@ -156,10 +184,25 @@ let monthDate = new Date(); monthDate.setDate(1);
 let bills = [];
 let paidMap = {};
 let selectedCategory = 'other';
+let selectedBillType = 'recurring';
 let justStampedId = null;
 
 const catOf = id => CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length-1];
 const monthKeyOf = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+const monthIndex = key => {
+  if (!key || !/^\d{4}-\d{2}$/.test(String(key))) return null;
+  const [y,m] = String(key).split('-').map(Number);
+  return y * 12 + (m - 1);
+};
+const installmentInfo = (bill, currentKey) => {
+  if (bill.type !== 'installment') return { active: true, number: null, total: null };
+  const start = monthIndex(bill.startMonth);
+  const current = monthIndex(currentKey);
+  const total = Number(bill.installments) || 0;
+  if (start === null || current === null || total < 1) return { active: false, number: null, total };
+  const number = current - start + 1;
+  return { active: number >= 1 && number <= total, number, total };
+};
 const daysInMonth = (y,m) => new Date(y, m+1, 0).getDate();
 const baht = n => Number(n).toLocaleString('th-TH', { maximumFractionDigits: 2 });
 
@@ -195,12 +238,14 @@ function render() {
   document.getElementById('currentTag').textContent = isCurrentMonth ? 'เดือนนี้' : '';
 
   const rows = bills.map(b => {
+    const inst = installmentInfo(b, monthKey);
+    if (!inst.active) return null;
     const day = Math.min(b.dueDay, dim);
     const dueDate = new Date(monthDate.getFullYear(), monthDate.getMonth(), day);
     const paid = paidIds.includes(b.id);
     const overdue = !paid && isCurrentMonth && dueDate < today;
-    return { ...b, day, paid, overdue };
-  }).sort((a,b) => a.day - b.day);
+    return { ...b, day, paid, overdue, installmentNumber: inst.number, installmentTotal: inst.total };
+  }).filter(Boolean).sort((a,b) => a.day - b.day);
 
   const total = rows.reduce((s,r)=>s+r.amount,0);
   const paidAmt = rows.filter(r=>r.paid).reduce((s,r)=>s+r.amount,0);
@@ -230,7 +275,7 @@ function render() {
         <div class="icon-circle ${r.paid ? 'paid' : ''}">${cat.icon}</div>
         <div style="flex:1; min-width:0;">
           <div class="row-name">${escapeHtml(r.name)}</div>
-          <div class="row-meta ${r.overdue ? 'overdue' : ''}">${cat.label} · ครบกำหนดวันที่ ${r.day}${r.overdue ? ' · เลยกำหนดชำระ' : ''}</div>
+          <div class="row-meta ${r.overdue ? 'overdue' : ''}">${cat.label}${r.installmentNumber ? ` · งวดที่ ${r.installmentNumber}/${r.installmentTotal}` : ''} · ครบกำหนดวันที่ ${r.day}${r.overdue ? ' · เลยกำหนดชำระ' : ''}</div>
         </div>
         <div class="row-amount">฿${baht(r.amount)}</div>
         <button class="check-btn ${r.paid ? 'paid' : ''}" data-toggle="${r.id}" aria-label="${r.paid ? 'ยกเลิกจ่ายแล้ว' : 'ทำเครื่องหมายว่าจ่ายแล้ว'}">${r.paid ? '✓' : ''}</button>
@@ -289,6 +334,20 @@ function showErr(e) {
   setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
+function buildTypeGrid() {
+  document.querySelectorAll('[data-type]').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-type') === selectedBillType);
+  });
+  document.getElementById('installmentFields').classList.toggle('show', selectedBillType === 'installment');
+}
+
+document.querySelectorAll('[data-type]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    selectedBillType = btn.getAttribute('data-type');
+    buildTypeGrid();
+  });
+});
+
 function buildCatGrid() {
   const grid = document.getElementById('catGrid');
   grid.innerHTML = CATEGORIES.map(c => `
@@ -307,7 +366,7 @@ function buildCatGrid() {
 document.getElementById('prevBtn').addEventListener('click', () => { monthDate.setMonth(monthDate.getMonth()-1); render(); });
 document.getElementById('nextBtn').addEventListener('click', () => { monthDate.setMonth(monthDate.getMonth()+1); render(); });
 document.getElementById('resetBtn').addEventListener('click', resetAll);
-document.getElementById('addFab').addEventListener('click', () => document.getElementById('overlay').classList.add('open'));
+document.getElementById('addFab').addEventListener('click', () => { document.getElementById('fStartMonth').value = monthKeyOf(new Date()); document.getElementById('overlay').classList.add('open'); });
 document.getElementById('closeBtn').addEventListener('click', () => document.getElementById('overlay').classList.remove('open'));
 document.getElementById('overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') e.currentTarget.classList.remove('open'); });
 
@@ -316,19 +375,35 @@ document.getElementById('billForm').addEventListener('submit', async (e) => {
   const name = document.getElementById('fName').value.trim();
   const amount = parseFloat(document.getElementById('fAmount').value);
   const dueDay = Math.min(Math.max(parseInt(document.getElementById('fDueDay').value)||1,1),31);
+  const startMonth = document.getElementById('fStartMonth').value;
+  const installments = Math.min(Math.max(parseInt(document.getElementById('fInstallments').value) || 1, 1), 120);
   if (!name || !amount) return;
+  if (selectedBillType === 'installment' && !startMonth) {
+    showErr(new Error('กรุณาเลือกเดือนเริ่มผ่อน'));
+    return;
+  }
   try {
-    const data = await api('addBill', { data: encodeURIComponent(JSON.stringify({ name, amount, dueDay, category: selectedCategory })) });
+    const data = await api('addBill', { data: encodeURIComponent(JSON.stringify({
+      name, amount, dueDay, category: selectedCategory,
+      type: selectedBillType,
+      startMonth: selectedBillType === 'installment' ? startMonth : '',
+      installments: selectedBillType === 'installment' ? installments : 0
+    })) });
     bills = data.bills; paidMap = data.paidMap;
     document.getElementById('billForm').reset();
     document.getElementById('fDueDay').value = 1;
     selectedCategory = 'other';
+    selectedBillType = 'recurring';
+    document.getElementById('fStartMonth').value = monthKeyOf(new Date());
+    document.getElementById('fInstallments').value = 1;
+    buildTypeGrid();
     buildCatGrid();
     document.getElementById('overlay').classList.remove('open');
     render();
   } catch (e) { showErr(e); }
 });
 
+buildTypeGrid();
 buildCatGrid();
 loadAll();
 </script>
