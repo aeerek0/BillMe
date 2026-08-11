@@ -63,16 +63,21 @@
   .cat-btn span{font-size:10.5px; color:var(--ink-muted); text-align:center; line-height:1.2;}
   .cat-btn.active span{color:var(--cover);}
   .submit-btn{width:100%; margin-top:8px; padding:13px 0; border-radius:12px; border:none; background:var(--cover); color:var(--gold); font-size:15px; font-weight:700; cursor:pointer;}
-  .type-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
-  .type-btn{padding:10px 8px; border-radius:10px; border:1.5px solid var(--line); background:#fff; cursor:pointer; text-align:center; font-size:13px; color:var(--ink-muted);}
-  .type-btn.active{border-color:var(--cover); background:rgba(31,61,58,.06); color:var(--cover); font-weight:700;}
-  .installment-fields{display:none;}
-  .installment-fields.show{display:block;}
-  .installment-note{font-size:11px; color:var(--ink-muted); margin-top:4px; line-height:1.4;}
   .err-msg{text-align:center; margin-top:10px; font-size:12px; color:var(--overdue);}
   @keyframes stampIn{0%{opacity:0; transform:translateY(-50%) rotate(-14deg) scale(1.6);}60%{opacity:1;}100%{opacity:.75; transform:translateY(-50%) rotate(-10deg) scale(1);}}
   .stamp.new{animation:stampIn .4s ease-out;}
   button:focus-visible, input:focus-visible{outline:2px solid var(--gold); outline-offset:2px;}
+
+  .pay-overlay{position:fixed;inset:0;background:rgba(18,33,31,.45);display:none;align-items:flex-end;justify-content:center;z-index:20;}
+  .pay-overlay.open{display:flex;}
+  .pay-sheet{background:var(--paper);width:100%;max-width:460px;border-radius:18px 18px 0 0;padding:18px 20px 24px;box-shadow:0 -6px 24px rgba(0,0,0,.2);}
+  .pay-info{background:#fff;border-radius:12px;padding:12px;margin:10px 0 14px;font-size:13px;}
+  .pay-info-row{display:flex;justify-content:space-between;margin:4px 0;}
+  .pay-est{color:var(--ink-muted);}
+  .pay-input{width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);font-size:16px;font-family:inherit;background:#fff;color:var(--ink);}
+  .pay-date{width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);font-size:14px;font-family:inherit;background:#fff;color:var(--ink);}
+  .installment-badge{display:inline-block;margin-left:5px;padding:1px 6px;border-radius:999px;background:rgba(201,162,39,.14);color:#8a6d13;font-size:10px;}
+
 </style>
 </head>
 <body>
@@ -134,24 +139,23 @@
     </div>
     <div class="field">
       <div class="field-label">ประเภทบิล</div>
-      <div class="type-grid" id="typeGrid">
-        <button type="button" class="type-btn active" data-type="recurring">🔄 บิลประจำ</button>
-        <button type="button" class="type-btn" data-type="installment">🧾 บิลผ่อน</button>
+      <div class="two-col">
+        <button type="button" class="cat-btn active" id="typeRecurring" style="flex:1;">🔄<span>บิลประจำ</span></button>
+        <button type="button" class="cat-btn" id="typeInstallment" style="flex:1;">🧾<span>บิลผ่อน</span></button>
       </div>
     </div>
 
-    <div class="installment-fields" id="installmentFields">
+    <div class="field" id="installmentFields" style="display:none;">
       <div class="two-col">
         <div class="field" style="flex:1;">
-          <div class="field-label">เริ่มผ่อนเดือน</div>
+          <div class="field-label">เดือนเริ่มผ่อน</div>
           <input id="fStartMonth" type="month" />
         </div>
         <div class="field" style="width:120px;">
           <div class="field-label">จำนวนงวด</div>
-          <input id="fInstallments" type="number" min="1" max="120" value="1" />
+          <input id="fInstallments" type="number" min="1" max="120" value="10" />
         </div>
       </div>
-      <div class="installment-note">ระบบจะแสดงบิลเฉพาะช่วงเดือนที่ผ่อน และจะแสดงเลขงวด เช่น งวดที่ 3/10</div>
     </div>
 
     <div class="field">
@@ -164,7 +168,7 @@
 
 <script>
 /* ===== ตั้งค่าให้ตรงกับของคุณ ===== */
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPwhw0M27PF0Shrc3ihL6mw7np0wmBa1h-122T9KmJ_cVw4CNv0j2Xru8ZT6aDUnLy/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxqdgdFDclFKDUm5WjFifJR66DmsdzDrKv7_cl3f5N4Hcb1bxP-wF1FbgADNAFkDYr3/exec';
 const TOKEN = '4830203652@Aee'; // ต้องตรงกับ TOKEN ใน Code.gs
 /* ================================== */
 
@@ -184,25 +188,11 @@ let monthDate = new Date(); monthDate.setDate(1);
 let bills = [];
 let paidMap = {};
 let selectedCategory = 'other';
-let selectedBillType = 'recurring';
 let justStampedId = null;
+let payingBillId = null;
 
 const catOf = id => CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length-1];
 const monthKeyOf = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-const monthIndex = key => {
-  if (!key || !/^\d{4}-\d{2}$/.test(String(key))) return null;
-  const [y,m] = String(key).split('-').map(Number);
-  return y * 12 + (m - 1);
-};
-const installmentInfo = (bill, currentKey) => {
-  if (bill.type !== 'installment') return { active: true, number: null, total: null };
-  const start = monthIndex(bill.startMonth);
-  const current = monthIndex(currentKey);
-  const total = Number(bill.installments) || 0;
-  if (start === null || current === null || total < 1) return { active: false, number: null, total };
-  const number = current - start + 1;
-  return { active: number >= 1 && number <= total, number, total };
-};
 const daysInMonth = (y,m) => new Date(y, m+1, 0).getDate();
 const baht = n => Number(n).toLocaleString('th-TH', { maximumFractionDigits: 2 });
 
@@ -230,55 +220,112 @@ function render() {
   const monthKey = monthKeyOf(monthDate);
   const dim = daysInMonth(monthDate.getFullYear(), monthDate.getMonth());
   const today = new Date();
-  const isCurrentMonth = monthDate.getFullYear() === today.getFullYear() && monthDate.getMonth() === today.getMonth();
-  const paidIds = paidMap[monthKey] || [];
+  today.setHours(0,0,0,0);
+
+  const isCurrentMonth =
+    monthDate.getFullYear() === today.getFullYear() &&
+    monthDate.getMonth() === today.getMonth();
+
+  const paidRows = paidMap[monthKey] || {};
   const beYear = monthDate.getFullYear() + 543;
 
-  document.getElementById('monthLabel').textContent = `${THAI_MONTHS[monthDate.getMonth()]} ${beYear}`;
-  document.getElementById('currentTag').textContent = isCurrentMonth ? 'เดือนนี้' : '';
+  document.getElementById('monthLabel').textContent =
+    `${THAI_MONTHS[monthDate.getMonth()]} ${beYear}`;
+  document.getElementById('currentTag').textContent =
+    isCurrentMonth ? 'เดือนนี้' : '';
+
+  const currentIndex = monthDate.getFullYear() * 12 + monthDate.getMonth();
 
   const rows = bills.map(b => {
-    const inst = installmentInfo(b, monthKey);
-    if (!inst.active) return null;
+    let installmentNo = null;
+    let installmentTotal = null;
+
+    if (b.type === 'installment') {
+      if (!b.startMonth || !b.installments) return null;
+
+      const [sy, sm] = b.startMonth.split('-').map(Number);
+      if (!sy || !sm) return null;
+
+      const startIndex = sy * 12 + (sm - 1);
+      installmentNo = currentIndex - startIndex + 1;
+      installmentTotal = Number(b.installments);
+
+      if (installmentNo < 1 || installmentNo > installmentTotal) return null;
+    }
+
     const day = Math.min(b.dueDay, dim);
     const dueDate = new Date(monthDate.getFullYear(), monthDate.getMonth(), day);
-    const paid = paidIds.includes(b.id);
+    const paidInfo = paidRows[String(b.id)];
+    const paid = !!paidInfo;
     const overdue = !paid && isCurrentMonth && dueDate < today;
-    return { ...b, day, paid, overdue, installmentNumber: inst.number, installmentTotal: inst.total };
+
+    return {
+      ...b,
+      day,
+      paid,
+      paidAmount: paidInfo ? Number(paidInfo.paidAmount || 0) : 0,
+      paidDate: paidInfo ? paidInfo.paidDate : '',
+      overdue,
+      installmentNo,
+      installmentTotal
+    };
   }).filter(Boolean).sort((a,b) => a.day - b.day);
 
   const total = rows.reduce((s,r)=>s+r.amount,0);
-  const paidAmt = rows.filter(r=>r.paid).reduce((s,r)=>s+r.amount,0);
-  const remain = total - paidAmt;
-  const progress = total > 0 ? paidAmt/total : 0;
+  const paidAmt = rows.filter(r=>r.paid).reduce((s,r)=>s+r.paidAmount,0);
+  const remain = total - rows.filter(r=>!r.paid).reduce((s,r)=>s+r.amount,0);
+  const progress = total > 0 ? paidAmt / total : 0;
 
   document.getElementById('statTotal').textContent = '฿' + baht(total);
   document.getElementById('statPaid').textContent = '฿' + baht(paidAmt);
-  document.getElementById('statRemain').textContent = '฿' + baht(remain);
-  document.getElementById('statRemain').style.color = remain > 0 ? 'var(--overdue)' : 'var(--ink-muted)';
-  document.getElementById('progressFill').style.width = Math.round(progress*100) + '%';
+  document.getElementById('statRemain').textContent = '฿' + baht(Math.max(remain,0));
+  document.getElementById('statRemain').style.color =
+    remain > 0 ? 'var(--overdue)' : 'var(--ink-muted)';
+  document.getElementById('progressFill').style.width =
+    Math.min(Math.round(progress*100),100) + '%';
 
   const listArea = document.getElementById('listArea');
   const resetBtn = document.getElementById('resetBtn');
 
   if (rows.length === 0) {
-    listArea.innerHTML = `<div class="empty">🧾<br>ยังไม่มีรายการบิลในเดือนนี้<br><span style="font-size:13px;">แตะปุ่ม + ด้านล่างเพื่อเพิ่มบิลแรกของคุณ</span></div>`;
-    resetBtn.style.display = 'none';
+    listArea.innerHTML =
+      `<div class="empty">🧾<br>ยังไม่มีรายการบิลในเดือนนี้<br>
+      <span style="font-size:13px;">แตะปุ่ม + ด้านล่างเพื่อเพิ่มบิลแรกของคุณ</span></div>`;
+    resetBtn.style.display = bills.length ? 'block' : 'none';
     return;
   }
+
   resetBtn.style.display = bills.length ? 'block' : 'none';
 
   listArea.innerHTML = `<div class="card">${rows.map(r => {
     const cat = catOf(r.category);
+    const typeBadge = r.installmentNo
+      ? `<span class="installment-badge">งวด ${r.installmentNo}/${r.installmentTotal}</span>`
+      : '';
+
+    const paidText = r.paid
+      ? ` · จ่ายจริง ฿${baht(r.paidAmount)}`
+      : '';
+
     return `
       <div class="row">
         <div class="icon-circle ${r.paid ? 'paid' : ''}">${cat.icon}</div>
-        <div style="flex:1; min-width:0;">
-          <div class="row-name">${escapeHtml(r.name)}</div>
-          <div class="row-meta ${r.overdue ? 'overdue' : ''}">${cat.label}${r.installmentNumber ? ` · งวดที่ ${r.installmentNumber}/${r.installmentTotal}` : ''} · ครบกำหนดวันที่ ${r.day}${r.overdue ? ' · เลยกำหนดชำระ' : ''}</div>
+        <div style="flex:1;min-width:0;">
+          <div class="row-name">${escapeHtml(r.name)}${typeBadge}</div>
+          <div class="row-meta ${r.overdue ? 'overdue' : ''}">
+            ${cat.label} · ครบกำหนดวันที่ ${r.day}
+            ${r.overdue ? ' · เลยกำหนดชำระ' : ''}
+            ${paidText}
+          </div>
         </div>
-        <div class="row-amount">฿${baht(r.amount)}</div>
-        <button class="check-btn ${r.paid ? 'paid' : ''}" data-toggle="${r.id}" aria-label="${r.paid ? 'ยกเลิกจ่ายแล้ว' : 'ทำเครื่องหมายว่าจ่ายแล้ว'}">${r.paid ? '✓' : ''}</button>
+        <div class="row-amount">
+          ฿${baht(r.paid ? r.paidAmount : r.amount)}
+        </div>
+        <button class="check-btn ${r.paid ? 'paid' : ''}"
+          data-toggle="${r.id}"
+          aria-label="${r.paid ? 'ดูการจ่าย' : 'บันทึกการจ่าย'}">
+          ${r.paid ? '✓' : ''}
+        </button>
         <button class="del-btn" data-delete="${r.id}" aria-label="ลบรายการ">🗑</button>
         ${r.paid ? `<div class="stamp ${justStampedId === r.id ? 'new' : ''}">จ่ายแล้ว</div>` : ''}
       </div>`;
@@ -287,29 +334,95 @@ function render() {
   justStampedId = null;
 
   listArea.querySelectorAll('[data-toggle]').forEach(btn => {
-    btn.addEventListener('click', () => togglePaid(btn.getAttribute('data-toggle')));
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-toggle');
+      const row = rows.find(x => String(x.id) === String(id));
+      if (row && row.paid) {
+        // ถ้าจ่ายแล้ว กดอีกครั้งให้ยกเลิกการจ่าย
+        togglePaid(id);
+      } else {
+        openPayModal(id);
+      }
+    });
   });
+
   listArea.querySelectorAll('[data-delete]').forEach(btn => {
-    btn.addEventListener('click', () => deleteBill(btn.getAttribute('data-delete')));
+    btn.addEventListener('click', () =>
+      deleteBill(btn.getAttribute('data-delete'))
+    );
   });
 }
-
 function escapeHtml(str) {
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
 }
 
-async function togglePaid(id) {
-  const monthKey = monthKeyOf(monthDate);
-  justStampedId = id;
-  try {
-    const data = await api('togglePaid', { monthKey, id });
-    bills = data.bills; paidMap = data.paidMap;
-    render();
-  } catch (e) { showErr(e); }
+function openPayModal(id) {
+  const bill = bills.find(b => String(b.id) === String(id));
+  if (!bill) return;
+
+  payingBillId = id;
+  document.getElementById('payBillName').textContent = bill.name;
+  document.getElementById('payEstimate').textContent = '฿' + baht(bill.amount);
+  document.getElementById('payEstimate2').textContent = '฿' + baht(bill.amount);
+  document.getElementById('payAmount').value = bill.amount;
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth()+1).padStart(2,'0');
+  const d = String(now.getDate()).padStart(2,'0');
+  document.getElementById('payDate').value = `${y}-${m}-${d}`;
+
+  document.getElementById('payOverlay').classList.add('open');
+  document.getElementById('payAmount').focus();
 }
 
+function closePayModal() {
+  document.getElementById('payOverlay').classList.remove('open');
+  payingBillId = null;
+}
+
+async function savePayment() {
+  if (!payingBillId) return;
+
+  const paidAmount = parseFloat(document.getElementById('payAmount').value);
+  const paidDate = document.getElementById('payDate').value;
+
+  if (!Number.isFinite(paidAmount) || paidAmount < 0 || !paidDate) return;
+
+  const monthKey = monthKeyOf(monthDate);
+  justStampedId = payingBillId;
+
+  try {
+    const data = await api('savePayment', {
+      monthKey,
+      id: payingBillId,
+      paidAmount: String(paidAmount),
+      paidDate
+    });
+
+    bills = data.bills;
+    paidMap = data.paidMap;
+    closePayModal();
+    render();
+  } catch (e) {
+    showErr(e);
+  }
+}
+
+async function togglePaid(id) {
+  const monthKey = monthKeyOf(monthDate);
+
+  try {
+    const data = await api('togglePaid', { monthKey, id });
+    bills = data.bills;
+    paidMap = data.paidMap;
+    render();
+  } catch (e) {
+    showErr(e);
+  }
+}
 async function deleteBill(id) {
   try {
     const data = await api('deleteBill', { id });
@@ -334,20 +447,6 @@ function showErr(e) {
   setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
-function buildTypeGrid() {
-  document.querySelectorAll('[data-type]').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-type') === selectedBillType);
-  });
-  document.getElementById('installmentFields').classList.toggle('show', selectedBillType === 'installment');
-}
-
-document.querySelectorAll('[data-type]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    selectedBillType = btn.getAttribute('data-type');
-    buildTypeGrid();
-  });
-});
-
 function buildCatGrid() {
   const grid = document.getElementById('catGrid');
   grid.innerHTML = CATEGORIES.map(c => `
@@ -366,46 +465,109 @@ function buildCatGrid() {
 document.getElementById('prevBtn').addEventListener('click', () => { monthDate.setMonth(monthDate.getMonth()-1); render(); });
 document.getElementById('nextBtn').addEventListener('click', () => { monthDate.setMonth(monthDate.getMonth()+1); render(); });
 document.getElementById('resetBtn').addEventListener('click', resetAll);
-document.getElementById('addFab').addEventListener('click', () => { document.getElementById('fStartMonth').value = monthKeyOf(new Date()); document.getElementById('overlay').classList.add('open'); });
+document.getElementById('addFab').addEventListener('click', () => document.getElementById('overlay').classList.add('open'));
 document.getElementById('closeBtn').addEventListener('click', () => document.getElementById('overlay').classList.remove('open'));
 document.getElementById('overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') e.currentTarget.classList.remove('open'); });
+
+let selectedBillType = 'recurring';
+
+document.getElementById('typeRecurring').addEventListener('click', () => {
+  selectedBillType = 'recurring';
+  document.getElementById('typeRecurring').classList.add('active');
+  document.getElementById('typeInstallment').classList.remove('active');
+  document.getElementById('installmentFields').style.display = 'none';
+});
+
+document.getElementById('typeInstallment').addEventListener('click', () => {
+  selectedBillType = 'installment';
+  document.getElementById('typeInstallment').classList.add('active');
+  document.getElementById('typeRecurring').classList.remove('active');
+  document.getElementById('installmentFields').style.display = 'block';
+
+  if (!document.getElementById('fStartMonth').value) {
+    document.getElementById('fStartMonth').value = monthKeyOf(monthDate);
+  }
+});
+
+document.getElementById('payCloseBtn').addEventListener('click', closePayModal);
+document.getElementById('payOverlay').addEventListener('click', e => {
+  if (e.target.id === 'payOverlay') closePayModal();
+});
+
+document.getElementById('payForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  await savePayment();
+});
 
 document.getElementById('billForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = document.getElementById('fName').value.trim();
   const amount = parseFloat(document.getElementById('fAmount').value);
   const dueDay = Math.min(Math.max(parseInt(document.getElementById('fDueDay').value)||1,1),31);
-  const startMonth = document.getElementById('fStartMonth').value;
-  const installments = Math.min(Math.max(parseInt(document.getElementById('fInstallments').value) || 1, 1), 120);
-  if (!name || !amount) return;
-  if (selectedBillType === 'installment' && !startMonth) {
-    showErr(new Error('กรุณาเลือกเดือนเริ่มผ่อน'));
-    return;
+
+  if (!name || !Number.isFinite(amount) || amount < 0) return;
+
+  let startMonth = '';
+  let installments = 0;
+
+  if (selectedBillType === 'installment') {
+    startMonth = document.getElementById('fStartMonth').value || monthKeyOf(monthDate);
+    installments = Math.min(Math.max(parseInt(document.getElementById('fInstallments').value)||1,1),120);
   }
+
   try {
-    const data = await api('addBill', { data: encodeURIComponent(JSON.stringify({
-      name, amount, dueDay, category: selectedCategory,
-      type: selectedBillType,
-      startMonth: selectedBillType === 'installment' ? startMonth : '',
-      installments: selectedBillType === 'installment' ? installments : 0
-    })) });
+    const data = await api('addBill', {
+      data: encodeURIComponent(JSON.stringify({
+        name,
+        amount,
+        dueDay,
+        category: selectedCategory,
+        type: selectedBillType,
+        startMonth,
+        installments
+      }))
+    });
     bills = data.bills; paidMap = data.paidMap;
     document.getElementById('billForm').reset();
     document.getElementById('fDueDay').value = 1;
+    document.getElementById('fStartMonth').value = '';
+    document.getElementById('fInstallments').value = 10;
     selectedCategory = 'other';
     selectedBillType = 'recurring';
-    document.getElementById('fStartMonth').value = monthKeyOf(new Date());
-    document.getElementById('fInstallments').value = 1;
-    buildTypeGrid();
+    document.getElementById('typeRecurring').classList.add('active');
+    document.getElementById('typeInstallment').classList.remove('active');
+    document.getElementById('installmentFields').style.display = 'none';
     buildCatGrid();
     document.getElementById('overlay').classList.remove('open');
     render();
   } catch (e) { showErr(e); }
 });
 
-buildTypeGrid();
 buildCatGrid();
 loadAll();
 </script>
+
+<div class="pay-overlay" id="payOverlay">
+  <form class="pay-sheet" id="payForm">
+    <div class="sheet-head">
+      <div class="serif sheet-title">บันทึกการจ่าย</div>
+      <button type="button" class="close-btn" id="payCloseBtn" aria-label="ปิด">✕</button>
+    </div>
+    <div class="pay-info">
+      <div class="pay-info-row"><strong id="payBillName">-</strong><strong id="payEstimate">฿0</strong></div>
+      <div class="pay-info-row pay-est"><span>ยอดประมาณการ</span><span id="payEstimate2">฿0</span></div>
+    </div>
+    <div class="field">
+      <div class="field-label">ยอดจ่ายจริง (บาท)</div>
+      <input id="payAmount" class="pay-input" type="number" min="0" step="0.01" required />
+    </div>
+    <div class="field">
+      <div class="field-label">วันที่จ่ายจริง</div>
+      <input id="payDate" class="pay-date" type="date" required />
+    </div>
+    <button type="submit" class="submit-btn">บันทึกการจ่าย</button>
+  </form>
+</div>
+
 </body>
 </html>
